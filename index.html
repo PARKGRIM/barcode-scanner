@@ -1,0 +1,93 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>설해원 실사 스캐너</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;max-width:580px;margin:auto;padding:18px;background:#fafafa;color:#222}
+h1{font-size:24px}#reader{width:100%;background:#eee;min-height:180px}button,input{font-size:18px;padding:12px;border-radius:10px;border:1px solid #bbb;box-sizing:border-box}button{background:#fff;cursor:pointer}#start,#save{background:#1967d2;color:white;border:0;width:100%;margin:8px 0}#save:disabled{opacity:.45}#code,#secret{width:100%;margin:6px 0}#qty{width:100px;text-align:center}.qty{display:flex;justify-content:center;gap:12px;margin:14px 0;align-items:center}.qty button{min-width:60px}.status{padding:14px;background:#eee;border-radius:10px;white-space:pre-wrap;margin-top:15px}.small{font-size:13px;color:#555}#item{font-size:18px;font-weight:bold;min-height:25px}#bridge{position:absolute;left:-9999px;width:1px;height:1px;border:0}
+</style>
+</head>
+<body>
+<h1>설해원 실사 스캐너</h1>
+<p class="small">카메라 인식 후 수량을 정해 저장합니다. 저장 후 다음 상품을 스캔할 수 있습니다.</p>
+<label>접속 코드<input id="secret" type="password" autocomplete="off" placeholder="Apps Script에 설정한 접속 코드"></label>
+<button id="start" type="button">카메라 시작</button>
+<div id="reader"></div>
+<p>상품: <span id="item">대기 중</span></p>
+<label>바코드<input id="code" inputmode="numeric" autocomplete="off" placeholder="스캔 또는 직접 입력"></label>
+<button id="find" type="button">바코드 조회</button>
+<div class="qty"><button id="minus" type="button">-</button><input id="qty" type="number" min="1" max="9999" step="1" value="1"><button id="plus" type="button">+</button></div>
+<button id="save" type="button" disabled>선택 수량 추가 저장</button>
+<div id="status" class="status">스캔 대기 중</div>
+<p class="small">계속 스캔: 동일 바코드 자동 중복 인식 방지. 조회 후 저장을 누르기 전에는 시트가 바뀌지 않습니다.</p>
+<iframe id="bridge" name="scannerBridge"></iframe>
+<form id="apiForm" target="scannerBridge" method="POST" style="display:none">
+<input name="accessKey"><input name="action"><input name="barcode"><input name="quantity"><input name="requestId">
+</form>
+<script>
+// 앱스 스크립트의 '활성 웹 앱 URL'을 여기에 입력합니다.
+const WEB_APP_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_EXEC_URL';
+const $ = id => document.getElementById(id);
+let scanner = null, armed = true, busy = false, selected = null, pending = null;
+const status = s => $('status').textContent = s;
+const setButtons = () => { $('save').disabled = busy || !selected; $('find').disabled = busy; };
+function request(action, barcode, quantity=0) {
+  if(busy) return;
+  const accessKey = $('secret').value.trim();
+  if(!accessKey) return status('먼저 접속 코드를 입력해 주세요.');
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(WEB_APP_URL)) return status('HTML에 웹 앱 URL을 먼저 설정해 주세요.');
+  busy = true; setButtons();
+  const requestId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+  pending = {requestId, action, barcode};
+  const form=$('apiForm');form.action=WEB_APP_URL;
+  for(const [key,value] of Object.entries({accessKey,action,barcode,quantity,requestId})) form.elements.namedItem(key).value=String(value);
+  status(action==='lookup'?'상품 조회 중...':'실사 수량 저장 중...');
+  form.submit();
+  setTimeout(()=>{if(pending && pending.requestId===requestId){busy=false;pending=null;setButtons();status('응답 시간 초과. 시트에서 저장 여부를 확인한 후 다시 시도해 주세요.');}},20000);
+}
+window.addEventListener('message', e => {
+  const d=e.data;
+  if(!d || d.tag!=='seolhae-stock-scanner' || !pending || d.requestId!==pending.requestId) return;
+  if(!(/(^|\.)googleusercontent\.com$/.test(new URL(e.origin).hostname) || e.origin==='https://script.google.com'))return;
+  const action=pending.action;pending=null;busy=false;
+  if(!d.ok){status('오류: '+d.message);if(action==='lookup')selected=null;setButtons();return;}
+  if(action==='lookup'){
+    selected=d.barcode;$('code').value=d.barcode;$('item').textContent=d.name;
+    $('qty').value=1;armed=false;status('조회 완료 / 현재 실사 '+d.count+'개. 추가 수량을 정하고 저장해 주세요.');
+  } else {
+    status('저장 완료 / '+d.name+'\n'+d.added+'개 추가 → 실사 '+d.count+'개');
+    selected=null;$('item').textContent='다음 바코드 스캔 대기';$('code').value='';$('qty').value=1;
+    // 카메라에 동일 바코드가 계속 보이면 연속 입력되지 않도록 일시적으로 대기
+    setTimeout(()=>{armed=true;},1500);
+  }
+  setButtons();
+});
+function readCode(text){
+  if(!armed || busy || selected) return;
+  const code=String(text).trim();if(!/^\d{8,14}$/.test(code))return;
+  armed=false;$('code').value=code;request('lookup',code);
+}
+$('start').onclick=async()=>{
+  if(scanner)return;
+  if(!window.Html5Qrcode){status('스캔 라이브러리를 불러오지 못했습니다. 인터넷을 확인해 주세요.');return;}
+  scanner=new Html5Qrcode('reader');
+  try {
+    await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:260,height:130},aspectRatio:1.5},readCode,()=>{});
+    status('카메라 작동 중. 바코드를 사각형 안에 맞춰주세요.');
+    $('start').textContent='카메라 사용 중';$('start').disabled=true;
+  }catch(err){scanner=null;status('카메라 시작 실패: '+err+'. 브라우저 권한을 확인해 주세요.');}
+};
+$('find').onclick=()=>{const code=$('code').value.trim();selected=null;armed=false;request('lookup',code);};
+$('minus').onclick=()=>{$('qty').value=Math.max(1,(Number($('qty').value)||1)-1);};
+$('plus').onclick=()=>{$('qty').value=Math.min(9999,(Number($('qty').value)||1)+1);};
+$('save').onclick=()=>{
+  const quantity=Number($('qty').value);
+  if(!selected)return status('먼저 바코드를 조회해 주세요.');
+  if(!Number.isSafeInteger(quantity)||quantity<1||quantity>9999)return status('수량은 1~9999 정수여야 합니다.');
+  request('save',selected,quantity);
+};
+</script>
+</body></html>
