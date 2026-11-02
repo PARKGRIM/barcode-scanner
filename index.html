@@ -46,14 +46,36 @@ function request(action, barcode, quantity=0) {
   for(const [key,value] of Object.entries({accessKey,action,barcode,quantity,requestId})) form.elements.namedItem(key).value=String(value);
   status(action==='lookup'?'상품 조회 중...':'실사 수량 저장 중...');
   form.submit();
-  setTimeout(()=>{if(pending && pending.requestId===requestId){busy=false;pending=null;setButtons();status('응답 시간 초과. 시트에서 저장 여부를 확인한 후 다시 시도해 주세요.');}},20000);
-}
+  setTimeout(() => {
+  if (pending && pending.requestId === requestId) {
+    busy = false;
+    pending = null;
+    selected = null;
+    armed = true;
+    setButtons();
+
+    status(
+      '응답 시간 초과.\n' +
+      '구글시트 저장 여부를 확인한 뒤 다시 스캔해 주세요.'
+    );
+  }
+}, 20000);
 window.addEventListener('message', e => {
   const d=e.data;
   if(!d || d.tag!=='seolhae-stock-scanner' || !pending || d.requestId!==pending.requestId) return;
   if(!(/(^|\.)googleusercontent\.com$/.test(new URL(e.origin).hostname) || e.origin==='https://script.google.com'))return;
   const action=pending.action;pending=null;busy=false;
-  if(!d.ok){status('오류: '+d.message);if(action==='lookup')selected=null;setButtons();return;}
+  
+if (!d.ok) {
+  status('오류: ' + d.message);
+  if (action === 'lookup') {
+    selected = null;
+    armed = true;
+  }
+  setButtons();
+  return;
+}
+
   if(action==='lookup'){
     selected=d.barcode;$('code').value=d.barcode;$('item').textContent=d.name;
     $('qty').value=1;armed=false;status('조회 완료 / 현재 실사 '+d.count+'개. 추가 수량을 정하고 저장해 주세요.');
@@ -80,7 +102,18 @@ $('start').onclick=async()=>{
     $('start').textContent='카메라 사용 중';$('start').disabled=true;
   }catch(err){scanner=null;status('카메라 시작 실패: '+err+'. 브라우저 권한을 확인해 주세요.');}
 };
-$('find').onclick=()=>{const code=$('code').value.trim();selected=null;armed=false;request('lookup',code);};
+$('find').onclick = () => {
+  const code = $('code').value.trim();
+  selected = null;
+  armed = false;
+  request('lookup', code);
+};
+
+$('code').addEventListener('input', () => {
+  selected = null;
+  armed = true;
+  setButtons();
+});
 $('minus').onclick=()=>{$('qty').value=Math.max(1,(Number($('qty').value)||1)-1);};
 $('plus').onclick=()=>{$('qty').value=Math.min(9999,(Number($('qty').value)||1)+1);};
 $('save').onclick=()=>{
