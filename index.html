@@ -60,6 +60,8 @@ function request(action, barcode, quantity=0) {
     );
   }
 }, 20000);
+}
+
 window.addEventListener('message', e => {
   const d=e.data;
   if(!d || d.tag!=='seolhae-stock-scanner' || !pending || d.requestId!==pending.requestId) return;
