@@ -99,7 +99,7 @@ $('start').onclick=async()=>{
   if(!window.Html5Qrcode){status('스캔 라이브러리를 불러오지 못했습니다. 인터넷을 확인해 주세요.');return;}
   scanner=new Html5Qrcode('reader');
   try {
-    await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:260,height:130},aspectRatio:1.5},readCode,()=>{});
+    await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:250,height:150},aspectRatio:1.5},readCode,()=>{});
     status('카메라 작동 중. 바코드를 사각형 안에 맞춰주세요.');
     $('start').textContent='카메라 사용 중';$('start').disabled=true;
   }catch(err){scanner=null;status('카메라 시작 실패: '+err+'. 브라우저 권한을 확인해 주세요.');}
